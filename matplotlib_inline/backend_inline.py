@@ -46,7 +46,7 @@ def show(close=None, block=None):
             if image_strings is None:
                 ip.image_strings = dict()
                 image_strings = ip.image_strings
-            image_strings[ip.execution_count] = []
+            image_strings[ip.execution_count - 1] = []
 
         for figure_manager in figure_managers:
             display(
