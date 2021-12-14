@@ -54,7 +54,7 @@ def show(close=None, block=None):
                 metadata=_fetch_figure_metadata(figure_manager.canvas.figure),
             )
 
-            image_strings[ip.execution_count].append(
+            image_strings[ip.execution_count - 1].append(
                 fig_to_string(figure_manager.canvas.figure)
             )
 
