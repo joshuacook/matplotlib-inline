@@ -11,6 +11,8 @@ from matplotlib.backends.backend_agg import (  # noqa
 )
 from matplotlib import colors
 from matplotlib._pylab_helpers import Gcf
+from io import BytesIO
+import base64
 
 from IPython.core.interactiveshell import InteractiveShell
 from IPython.core.getipython import get_ipython
@@ -37,17 +39,31 @@ def show(close=None, block=None):
     if close is None:
         close = InlineBackend.instance().close_figures
     try:
-        for figure_manager in Gcf.get_all_fig_managers():
+        figure_managers = Gcf.get_all_fig_managers()
+        if len(figure_managers) > 0:
+            ip = get_ipython()
+            image_strings = getattr(ip, "image_strings", None)
+            if image_strings is None:
+                ip.image_strings = dict()
+                image_strings = ip.image_strings
+            image_strings[ip.execution_count] = []
+
+        for figure_manager in figure_managers:
             display(
                 figure_manager.canvas.figure,
-                metadata=_fetch_figure_metadata(figure_manager.canvas.figure)
+                metadata=_fetch_figure_metadata(figure_manager.canvas.figure),
             )
+
+            image_strings[ip.execution_count].append(
+                fig_to_string(figure_manager.canvas.figure)
+            )
+
     finally:
         show._to_draw = []
         # only call close('all') if any to close
         # close triggers gc.collect, which can be slow
         if close and Gcf.get_all_fig_managers():
-            matplotlib.pyplot.close('all')
+            matplotlib.pyplot.close("all")
 
 
 # This flag will be reset by draw_if_interactive when called
@@ -78,7 +94,7 @@ def draw_if_interactive():
     # https://github.com/ipython/ipython/issues/1612
     # https://github.com/matplotlib/matplotlib/issues/835
 
-    if not hasattr(fig, 'show'):
+    if not hasattr(fig, "show"):
         # Queue up `fig` for display
         fig.show = lambda *a: display(fig, metadata=_fetch_figure_metadata(fig))
 
@@ -171,8 +187,8 @@ def configure_inline_support(shell, backend):
     if cfg not in shell.configurables:
         shell.configurables.append(cfg)
 
-    if backend == 'module://matplotlib_inline.backend_inline':
-        shell.events.register('post_execute', flush_figures)
+    if backend == "module://matplotlib_inline.backend_inline":
+        shell.events.register("post_execute", flush_figures)
 
         # Save rcParams that will be overwrittern
         shell._saved_rcParams = {}
@@ -183,10 +199,10 @@ def configure_inline_support(shell, backend):
         new_backend_name = "inline"
     else:
         try:
-            shell.events.unregister('post_execute', flush_figures)
+            shell.events.unregister("post_execute", flush_figures)
         except ValueError:
             pass
-        if hasattr(shell, '_saved_rcParams'):
+        if hasattr(shell, "_saved_rcParams"):
             matplotlib.rcParams.update(shell._saved_rcParams)
             del shell._saved_rcParams
         new_backend_name = "other"
@@ -204,10 +220,12 @@ def configure_inline_support(shell, backend):
 def _enable_matplotlib_integration():
     """Enable extra IPython matplotlib integration when we are loaded as the matplotlib backend."""
     from matplotlib import get_backend
+
     ip = get_ipython()
     backend = get_backend()
-    if ip and backend == 'module://%s' % __name__:
+    if ip and backend == "module://%s" % __name__:
         from IPython.core.pylabtools import activate_matplotlib
+
         try:
             activate_matplotlib(backend)
             configure_inline_support(ip, backend)
@@ -216,8 +234,9 @@ def _enable_matplotlib_integration():
             def configure_once(*args):
                 activate_matplotlib(backend)
                 configure_inline_support(ip, backend)
-                ip.events.unregister('post_run_cell', configure_once)
-            ip.events.register('post_run_cell', configure_once)
+                ip.events.unregister("post_run_cell", configure_once)
+
+            ip.events.register("post_run_cell", configure_once)
 
 
 _enable_matplotlib_integration()
@@ -228,13 +247,17 @@ def _fetch_figure_metadata(fig):
     # determine if a background is needed for legibility
     if _is_transparent(fig.get_facecolor()):
         # the background is transparent
-        ticksLight = _is_light([label.get_color()
-                                for axes in fig.axes
-                                for axis in (axes.xaxis, axes.yaxis)
-                                for label in axis.get_ticklabels()])
+        ticksLight = _is_light(
+            [
+                label.get_color()
+                for axes in fig.axes
+                for axis in (axes.xaxis, axes.yaxis)
+                for label in axis.get_ticklabels()
+            ]
+        )
         if ticksLight.size and (ticksLight == ticksLight[0]).all():
             # there are one or more tick labels, all with the same lightness
-            return {'needs_background': 'dark' if ticksLight[0] else 'light'}
+            return {"needs_background": "dark" if ticksLight[0] else "light"}
 
     return None
 
@@ -244,13 +267,21 @@ def _is_light(color):
     opposed to dark). Based on ITU BT.601 luminance formula (see
     https://stackoverflow.com/a/596241)."""
     rgbaArr = colors.to_rgba_array(color)
-    return rgbaArr[:, :3].dot((.299, .587, .114)) > .5
+    return rgbaArr[:, :3].dot((0.299, 0.587, 0.114)) > 0.5
 
 
 def _is_transparent(color):
     """Determine transparency from alpha."""
     rgba = colors.to_rgba(color)
-    return rgba[3] < .5
+    return rgba[3] < 0.5
+
+
+def fig_to_string(fig):
+    """Given a matplotlib figure, return the bytes of that figure."""
+    figfile = BytesIO()
+    fig.savefig(figfile, format="png")
+    figfile.seek(0)  # rewind to beginning of file
+    return base64.b64encode(figfile.getvalue())
 
 
 def set_matplotlib_formats(*formats, **kwargs):
